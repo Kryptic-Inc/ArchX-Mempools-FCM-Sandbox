@@ -1,117 +1,150 @@
-/**
- * Sample React Native App
- * https://github.com/facebook/react-native
- *
- * @format
- */
-
-import React from 'react';
-import type {PropsWithChildren} from 'react';
+import React, {useState, useEffect} from 'react';
 import {
-  SafeAreaView,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  useColorScheme,
   View,
+  Text,
+  Switch,
+  StyleSheet,
+  PermissionsAndroid,
+  Platform,
+  Pressable,
+  Alert,
 } from 'react-native';
+import messaging from '@react-native-firebase/messaging';
+import Toast from 'react-native-toast-message';
+import Clipboard from '@react-native-clipboard/clipboard';
 
-import {
-  Colors,
-  DebugInstructions,
-  Header,
-  LearnMoreLinks,
-  ReloadInstructions,
-} from 'react-native/Libraries/NewAppScreen';
+function App() {
+  const [isEnabled, setIsEnabled] = useState(false);
+  const [fcmToken, setFcmToken] = useState('');
 
-type SectionProps = PropsWithChildren<{
-  title: string;
-}>;
+  useEffect(() => {
+    const unsubscribe = messaging().onMessage(async remoteMessage => {
+      Toast.show({
+        text1: 'New FCM Message',
+        text2: JSON.stringify(remoteMessage),
+      });
+    });
 
-function Section({children, title}: SectionProps): JSX.Element {
-  const isDarkMode = useColorScheme() === 'dark';
+    messaging().setBackgroundMessageHandler(async remoteMessage => {
+      Toast.show({
+        text1: 'Background FCM Message',
+        text2: JSON.stringify(remoteMessage),
+      });
+    });
+
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    const checkPermissionAndFetchToken = async () => {
+      let hasPermission;
+      if (Platform.OS === 'android' && Platform.Version >= 33) {
+        hasPermission = await PermissionsAndroid.check(
+          PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS,
+        );
+      } else {
+        hasPermission = await messaging().hasPermission();
+      }
+
+      if (hasPermission) {
+        setIsEnabled(true);
+        const token = await messaging().getToken();
+        setFcmToken(token);
+      }
+    };
+    checkPermissionAndFetchToken();
+  }, []);
+
+  const requestPermission = async () => {
+    if (Platform.OS === 'android' && Platform.Version >= 33) {
+      const hasPermission = await PermissionsAndroid.check(
+        PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS,
+      );
+      if (!hasPermission) {
+        return await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS,
+        );
+      }
+    }
+    return await messaging().requestPermission();
+  };
+
+  const registerOnFirebase = async () => {
+    const granted = await requestPermission();
+    if (granted) {
+      const token = await messaging().getToken();
+      setFcmToken(token);
+    } else {
+      Toast.show({text1: 'Permission denied'});
+    }
+  };
+
+  const unregisterOnFirebase = async () => {
+    await messaging().deleteToken();
+    setFcmToken('');
+  };
+
+  const toggleSwitch = async () => {
+    setIsEnabled(previousState => !previousState);
+    if (!isEnabled) {
+      await registerOnFirebase();
+    } else {
+      await unregisterOnFirebase();
+    }
+  };
+
+  const copyToClipboard = () => {
+    Clipboard.setString(fcmToken);
+  };
+
   return (
-    <View style={styles.sectionContainer}>
-      <Text
-        style={[
-          styles.sectionTitle,
-          {
-            color: isDarkMode ? Colors.white : Colors.black,
-          },
-        ]}>
-        {title}
-      </Text>
-      <Text
-        style={[
-          styles.sectionDescription,
-          {
-            color: isDarkMode ? Colors.light : Colors.dark,
-          },
-        ]}>
-        {children}
-      </Text>
+    <View style={styles.container}>
+      <View style={styles.switchContainer}>
+        <Text style={styles.label}>Enable FCM:</Text>
+        <Switch
+          trackColor={{false: '#767577', true: '#81b0ff'}}
+          thumbColor={isEnabled ? '#f5dd4b' : '#f4f3f4'}
+          onValueChange={toggleSwitch}
+          value={isEnabled}
+        />
+      </View>
+      <Pressable style={styles.tokenContainer} onPress={copyToClipboard}>
+        {fcmToken !== '' && <Text style={styles.tokenText}>{fcmToken}</Text>}
+      </Pressable>
+      <Toast />
     </View>
   );
 }
 
-function App(): JSX.Element {
-  const isDarkMode = useColorScheme() === 'dark';
-
-  const backgroundStyle = {
-    backgroundColor: isDarkMode ? Colors.darker : Colors.lighter,
-  };
-
-  return (
-    <SafeAreaView style={backgroundStyle}>
-      <StatusBar
-        barStyle={isDarkMode ? 'light-content' : 'dark-content'}
-        backgroundColor={backgroundStyle.backgroundColor}
-      />
-      <ScrollView
-        contentInsetAdjustmentBehavior="automatic"
-        style={backgroundStyle}>
-        <Header />
-        <View
-          style={{
-            backgroundColor: isDarkMode ? Colors.black : Colors.white,
-          }}>
-          <Section title="Step One">
-            Edit <Text style={styles.highlight}>App.tsx</Text> to change this
-            screen and then come back to see your edits.
-          </Section>
-          <Section title="See Your Changes">
-            <ReloadInstructions />
-          </Section>
-          <Section title="Debug">
-            <DebugInstructions />
-          </Section>
-          <Section title="Learn More">
-            Read the docs to discover what to do next:
-          </Section>
-          <LearnMoreLinks />
-        </View>
-      </ScrollView>
-    </SafeAreaView>
-  );
-}
-
 const styles = StyleSheet.create({
-  sectionContainer: {
-    marginTop: 32,
-    paddingHorizontal: 24,
+  container: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
   },
-  sectionTitle: {
-    fontSize: 24,
-    fontWeight: '600',
+  switchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
   },
-  sectionDescription: {
-    marginTop: 8,
-    fontSize: 18,
-    fontWeight: '400',
+  label: {
+    marginRight: 10,
   },
-  highlight: {
-    fontWeight: '700',
+  tokenContainer: {
+    marginTop: 20,
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+    backgroundColor: 'black',
+    borderRadius: 5,
+    width: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    height: 120,
+  },
+  tokenText: {
+    color: 'white',
+    textAlign: 'center',
   },
 });
 
